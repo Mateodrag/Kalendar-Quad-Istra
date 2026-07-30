@@ -656,23 +656,42 @@
     }catch(e){ alert('Kod: ' + bucketId); }
   });
 
-  async function kvdbCreateBucket(email, ttlSeconds){
-    const resp = await fetch('https://kvdb.io/bucket', {
+  async function tryCreateBucketAt(url, email, ttlSeconds){
+    const resp = await fetch(url, {
       method: 'POST',
       headers: {'Content-Type': 'application/x-www-form-urlencoded'},
       body: new URLSearchParams({email: email, default_ttl: String(ttlSeconds)})
     });
     const text = await resp.text();
     if(!resp.ok){
-      throw new Error('HTTP ' + resp.status + (text ? (': ' + text.slice(0,200)) : ''));
+      throw new Error('HTTP ' + resp.status + (text ? (': ' + text.slice(0,150)) : ''));
     }
     let id = text.trim().replace(/^"|"$/g, '');
     try{
       const parsed = JSON.parse(text);
       id = parsed.id || parsed.bucket_id || parsed.bucketId || parsed.key || id;
     }catch(e){ /* odgovor nije JSON, koristimo sirovi tekst kao ID */ }
-    if(!id) throw new Error('Server nije vratio ID spremišta (odgovor: ' + text.slice(0,200) + ')');
+    if(!id) throw new Error('Prazan odgovor servera');
     return id;
+  }
+
+  // Dokumentacija kvdb.io ne otkriva jasno pravu adresu za kreiranje spremišta,
+  // pa isprobavamo nekoliko mogućih adresa i koristimo prvu koja uspije.
+  async function kvdbCreateBucket(email, ttlSeconds){
+    const candidates = [
+      'https://kvdb.io/',
+      'https://kvdb.io/bucket',
+      'https://kvdb.io/buckets',
+    ];
+    const errors = [];
+    for(const url of candidates){
+      try{
+        return await tryCreateBucketAt(url, email, ttlSeconds);
+      }catch(e){
+        errors.push(url + ' → ' + errMsg(e));
+      }
+    }
+    throw new Error('Nijedna adresa nije uspjela:\n' + errors.join('\n'));
   }
 
   document.getElementById('createBucketBtn').addEventListener('click', async ()=>{
