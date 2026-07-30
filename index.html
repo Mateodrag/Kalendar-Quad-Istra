@@ -390,6 +390,7 @@
     </div>
     <div style="padding:20px 22px 22px;display:flex;flex-direction:column;gap:16px;">
       <p class="sync-status-line" id="syncStatusLine">Nije postavljeno.</p>
+      <p class="sync-note" id="syncErrorDetail" style="display:none;color:var(--danger);"></p>
 
       <div id="syncCodeBlock" style="display:none;">
         <div class="sync-section">
@@ -491,24 +492,42 @@
     try{ localStorage.setItem(LS_APPTS, JSON.stringify(appointments)); }catch(e){}
   }
 
-  function setSyncStatus(state, message){
+  let lastSyncErrorDetail = '';
+
+  function errMsg(e){
+    if(!e) return 'Nepoznata greška';
+    if(typeof e === 'string') return e;
+    if(e.message) return e.message + (e.name && e.name!=='Error' ? ' ('+e.name+')' : '');
+    try{ return JSON.stringify(e); }catch(_){ return String(e); }
+  }
+
+  function setSyncStatus(state, message, detail){
     // state: 'ok' | 'warn' | 'off'
     syncOK = state==='ok' ? true : (state==='warn' ? false : null);
+    lastSyncErrorDetail = detail || '';
     const dot = document.getElementById('syncDot');
     const text = document.getElementById('syncPillText');
-    if(!dot || !text) return;
-    dot.className = 'dot sync-dot-' + state;
-    text.textContent = message;
+    if(dot) dot.className = 'dot sync-dot-' + state;
+    if(text) text.textContent = message;
+    const detailEl = document.getElementById('syncErrorDetail');
+    if(detailEl){
+      if(detail){ detailEl.style.display = 'block'; detailEl.textContent = 'Detalji greške: ' + detail; }
+      else{ detailEl.style.display = 'none'; detailEl.textContent = ''; }
+    }
   }
 
   async function ensureBucket(){
     if(bucket) return bucket;
     if(!bucketId){ setSyncStatus('off','Sinkronizacija nije postavljena'); return null; }
+    if(typeof KVdb === 'undefined'){
+      setSyncStatus('warn','Skripta za sinkronizaciju nije učitana', 'KVdb biblioteka (unpkg.com/kvdb.io) nije dostupna — provjeri internetsku vezu, blokator oglasa (adblock/uBlock/Brave shield) ili firewall koji možda blokira unpkg.com.');
+      return null;
+    }
     try{
       bucket = KVdb.bucket(bucketId);
       return bucket;
     }catch(e){
-      setSyncStatus('warn','Greška pri povezivanju');
+      setSyncStatus('warn','Greška pri povezivanju', errMsg(e));
       return null;
     }
   }
@@ -528,7 +547,7 @@
       setSyncStatus('ok', 'Sinkronizirano ' + new Date().toLocaleTimeString('hr-HR',{hour:'2-digit',minute:'2-digit'}));
     }catch(e){
       console.error('Greška pri učitavanju iz clouda, koristim lokalnu kopiju:', e);
-      setSyncStatus('warn','Nema veze — prikazuje se lokalna kopija');
+      setSyncStatus('warn','Nema veze — prikazuje se lokalna kopija', errMsg(e));
     }
   }
 
@@ -543,7 +562,7 @@
       setSyncStatus('ok', 'Sinkronizirano ' + new Date().toLocaleTimeString('hr-HR',{hour:'2-digit',minute:'2-digit'}));
     }catch(e){
       console.error('Greška pri spremanju vozila u cloud:', e);
-      setSyncStatus('warn','Spremljeno lokalno, sinkronizacija nije uspjela');
+      setSyncStatus('warn','Spremljeno lokalno, sinkronizacija nije uspjela', errMsg(e));
     }
   }
   async function persistAppointments(){
@@ -557,7 +576,7 @@
       setSyncStatus('ok', 'Sinkronizirano ' + new Date().toLocaleTimeString('hr-HR',{hour:'2-digit',minute:'2-digit'}));
     }catch(e){
       console.error('Greška pri spremanju termina u cloud:', e);
-      setSyncStatus('warn','Spremljeno lokalno, sinkronizacija nije uspjela');
+      setSyncStatus('warn','Spremljeno lokalno, sinkronizacija nije uspjela', errMsg(e));
     }
   }
 
@@ -593,7 +612,7 @@
       }
       setSyncStatus('ok', 'Sinkronizirano ' + new Date().toLocaleTimeString('hr-HR',{hour:'2-digit',minute:'2-digit'}));
     }catch(e){
-      setSyncStatus('warn','Nema veze s cloudom');
+      setSyncStatus('warn','Nema veze s cloudom', errMsg(e));
     }
   }
   function startPolling(){
@@ -644,6 +663,9 @@
     const btn = document.getElementById('createBucketBtn');
     btn.disabled = true; btn.textContent = 'Kreiram...';
     try{
+      if(typeof KVdb === 'undefined'){
+        throw new Error('Biblioteka za sinkronizaciju (KVdb, s unpkg.com) nije se učitala u ovoj stranici — provjeri internetsku vezu, blokator oglasa (adblock/uBlock/Brave shield) ili firewall/DNS filter koji možda blokira unpkg.com.');
+      }
       const newId = await KVdb.createBucket({email, default_ttl: BUCKET_DEFAULT_TTL});
       bucketId = newId;
       localStorage.setItem(LS_BUCKET_KEY, bucketId);
@@ -656,7 +678,8 @@
       refreshSyncModal();
     }catch(e){
       console.error(e);
-      alert('Nije uspjelo kreiranje spremišta. Provjeri internetsku vezu i pokušaj ponovno.');
+      setSyncStatus('warn', 'Kreiranje spremišta nije uspjelo', errMsg(e));
+      alert('Nije uspjelo kreiranje spremišta.\n\nDetalji greške: ' + errMsg(e) + '\n\nNapravi screenshot ove poruke i pošalji ga za pomoć.');
     }finally{
       btn.disabled = false; btn.textContent = 'Generiraj novi kod i poveži ovo računalo';
     }
